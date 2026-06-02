@@ -1,0 +1,97 @@
+name: "Build and populate cache"
+on:
+  workflow_dispatch:
+    inputs:
+      nixosConfigurations:
+        description: "Build nixosConfigurations"
+        type: boolean
+        default: true
+      darwinConfigurations:
+        description: "Build darwinConfigurations"
+        type: boolean
+        default: true
+      homeConfigurations:
+        description: "Build homeConfigurations"
+        type: boolean
+        default: true
+      systemConfigs:
+        description: "Build systemConfigs"
+        type: boolean
+        default: true
+jobs:
+  list_configs:
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      configs_matrix: ${{ steps.list.outputs.configs_matrix }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: XYenon/nix-config
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: DeterminateSystems/magic-nix-cache-action@v13
+      - name: List configurations
+        id: list
+        run: |
+          MATRIX=$(nix eval --json --impure --expr '
+            let
+              self = (builtins.getFlake (toString ./.)).outputs;
+              collect = kind:
+                builtins.map (name: {
+                  inherit kind name;
+                  system = let
+                    cfg = builtins.getAttr name (builtins.getAttr kind self);
+                  in
+                    cfg.config.nixpkgs.system or cfg.pkgs.stdenv.hostPlatform.system or cfg.stdenv.hostPlatform.system or cfg.system;
+                }) (builtins.attrNames (self.${kind} or {}));
+            in
+              (collect "nixosConfigurations")
+              ++ (collect "darwinConfigurations")
+              ++ (collect "homeConfigurations")
+              ++ (collect "systemConfigs")
+          ')
+          MATRIX=$(echo "$MATRIX" | jq -c --arg nixos '${{ inputs.nixosConfigurations }}' \
+            --arg darwin '${{ inputs.darwinConfigurations }}' \
+            --arg home '${{ inputs.homeConfigurations }}' \
+            --arg system '${{ inputs.systemConfigs }}' \
+            'map(select(
+              (.kind == "nixosConfigurations" and $nixos == "true") or
+              (.kind == "darwinConfigurations" and $darwin == "true") or
+              (.kind == "homeConfigurations" and $home == "true") or
+              (.kind == "systemConfigs" and $system == "true")
+            )) | group_by(.system) | map({system: .[0].system, configs: .})')
+          echo "configs_matrix=$MATRIX" >> $GITHUB_OUTPUT
+  build:
+    needs: [list_configs]
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.system }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.list_configs.outputs.configs_matrix) }}
+    runs-on: ${{ (contains(matrix.system, 'darwin') && 'macos-latest') || (contains(matrix.system, 'aarch64') && 'ubuntu-24.04-arm') || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: wimpysworld/nothing-but-nix@v10
+      - uses: DeterminateSystems/nix-installer-action@v22
+        with:
+          extra-conf: |
+            build-dir = /nix/build
+            accept-flake-config = true
+            extra-substituters = https://xyenon.cachix.org https://nur-xyenon.cachix.org https://nix-community.cachix.org https://cache.garnix.io https://cache.numtide.com
+            extra-trusted-public-keys = xyenon.cachix.org-1:gH84PRzrUvoIv9Pl472D95LRzFN7E/kXoExqAm2c6Dk= nur-xyenon.cachix.org-1:fZ3SGJ3E1p34JSG5j4etfF9+vjJGMZxe1dDBNliKx5U= nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs= cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g= niks3.numtide.com-1:DTx8wZduET09hRmMtKdQDxNNthLQETkc/yaX7M4qK0g=
+      - uses: cachix/cachix-action@v17
+        with:
+          name: xyenon
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - uses: XYenon/attic-action@v0
+        with:
+          endpoint: "https://attic.xyenon.download"
+          cache: xyenon
+          token: ${{ secrets.ATTIC_AUTH_TOKEN }}
+          install-command: "nix profile install --accept-flake-config .#attic-client"
+          push-args: "-j 1"
+      - name: Build configurations for ${{ matrix.system }}
+        run: |
+          ./scripts/build-gh.sh '${{ toJson(matrix.configs) }}'
