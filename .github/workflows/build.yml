@@ -2,6 +2,10 @@ name: "Build and populate cache"
 on:
   workflow_dispatch:
     inputs:
+      ref:
+        description: "Git reference to build"
+        type: string
+        required: false
       nixosConfigurations:
         description: "Build nixosConfigurations"
         type: boolean
@@ -28,6 +32,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: XYenon/nix-config
+          ref: ${{ inputs.ref || '' }}
           token: ${{ secrets.REPO_TOKEN }}
       - uses: DeterminateSystems/nix-installer-action@v22
       - uses: DeterminateSystems/magic-nix-cache-action@v13
