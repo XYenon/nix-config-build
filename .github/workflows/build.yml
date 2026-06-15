@@ -87,16 +87,17 @@ jobs:
             accept-flake-config = true
             extra-substituters = https://xyenon.cachix.org https://nur-xyenon.cachix.org https://nix-community.cachix.org https://cache.garnix.io https://cache.numtide.com
             extra-trusted-public-keys = xyenon.cachix.org-1:gH84PRzrUvoIv9Pl472D95LRzFN7E/kXoExqAm2c6Dk= nur-xyenon.cachix.org-1:fZ3SGJ3E1p34JSG5j4etfF9+vjJGMZxe1dDBNliKx5U= nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs= cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g= niks3.numtide.com-1:DTx8wZduET09hRmMtKdQDxNNthLQETkc/yaX7M4qK0g=
-      - uses: cachix/cachix-action@v17
-        with:
-          name: xyenon
-          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - name: Install attic with cachix
+        run: |
+          nix profile add nixpkgs#cachix
+          cachix authtoken "${{ secrets.CACHIX_AUTH_TOKEN }}"
+          nix profile add --accept-flake-config .#attic-client
+          cachix push xyenon -j8 $(nix path-info -r .#attic-client)
       - uses: XYenon/attic-action@v0
         with:
           endpoint: "https://attic.xyenon.download"
           cache: xyenon
           token: ${{ secrets.ATTIC_AUTH_TOKEN }}
-          install-command: "nix profile install --accept-flake-config .#attic-client"
           push-args: "-j 1"
       - name: Build configurations for ${{ matrix.system }}
         run: |
