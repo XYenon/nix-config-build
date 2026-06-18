@@ -8,6 +8,10 @@ on:
         description: "Git reference to build"
         type: string
         required: false
+      flakeUpdate:
+        description: "Update flake inputs before build"
+        type: boolean
+        default: false
       nixosConfigurations:
         description: "Build nixosConfigurations"
         type: boolean
@@ -96,7 +100,7 @@ jobs:
             extra-substituters = https://xyenon.cachix.org https://nur-xyenon.cachix.org https://nix-community.cachix.org https://cache.garnix.io https://cache.numtide.com
             extra-trusted-public-keys = xyenon.cachix.org-1:gH84PRzrUvoIv9Pl472D95LRzFN7E/kXoExqAm2c6Dk= nur-xyenon.cachix.org-1:fZ3SGJ3E1p34JSG5j4etfF9+vjJGMZxe1dDBNliKx5U= nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs= cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g= niks3.numtide.com-1:DTx8wZduET09hRmMtKdQDxNNthLQETkc/yaX7M4qK0g=
       - name: Update flake inputs
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || inputs.flakeUpdate
         run: nix flake update
       - name: Install attic with cachix
         run: |
