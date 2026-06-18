@@ -110,6 +110,7 @@ jobs:
           cache: xyenon
           token: ${{ secrets.ATTIC_AUTH_TOKEN }}
           push-args: "-j 1"
+          push-max-retries: "10"
       - name: Build configurations for ${{ matrix.system }}
         run: |
           ./scripts/build-gh.sh '${{ toJson(matrix.configs) }}'
