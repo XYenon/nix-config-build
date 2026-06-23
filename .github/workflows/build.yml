@@ -35,7 +35,7 @@ jobs:
       configs_matrix: ${{ steps.list.outputs.configs_matrix }}
     steps:
       - &checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: XYenon/nix-config
           ref: ${{ inputs.ref || '' }}
