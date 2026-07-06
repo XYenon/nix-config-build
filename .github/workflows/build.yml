@@ -1,11 +1,13 @@
 name: "Build and populate cache"
 on:
-  schedule:
-    - cron: "37 23 * * *"
   workflow_dispatch:
     inputs:
       ref:
         description: "Git reference to build"
+        type: string
+        required: false
+      prNumber:
+        description: "nix-config PR number to rebase-merge after a successful build"
         type: string
         required: false
       flakeUpdate:
@@ -118,3 +120,25 @@ jobs:
       - name: Build configurations for ${{ matrix.system }}
         run: |
           ./scripts/build-gh.sh '${{ toJson(matrix.configs) }}'
+  merge_pr:
+    needs: [build]
+    if: >-
+      ${{ needs.build.result == 'success'
+      && github.event_name == 'workflow_dispatch'
+      && inputs.prNumber != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Rebase and merge nix-config PR
+        env:
+          GH_TOKEN: ${{ secrets.REPO_TOKEN }}
+          PR_NUMBER: ${{ inputs.prNumber }}
+        run: |
+          set -euo pipefail
+          echo "Rebasing and merging XYenon/nix-config#$PR_NUMBER"
+          gh pr merge "$PR_NUMBER" \
+            --repo XYenon/nix-config \
+            --rebase \
+            --delete-branch
