@@ -104,12 +104,8 @@ jobs:
       - name: Update flake inputs
         if: github.event_name == 'schedule' || inputs.flakeUpdate
         run: nix flake update
-      - name: Install attic with cachix
-        run: |
-          nix profile add nixpkgs#cachix
-          cachix authtoken "${{ secrets.CACHIX_AUTH_TOKEN }}"
-          nix profile add --accept-flake-config .#attic-client
-          cachix push xyenon -j8 $(nix path-info -r .#attic-client)
+      - name: Install attic-client
+        run: nix profile add --accept-flake-config github:XYenon/nur-packages#attic-client
       - uses: XYenon/attic-action@v0
         with:
           endpoint: "https://attic.xyenon.download"
