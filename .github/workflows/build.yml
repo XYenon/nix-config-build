@@ -1,0 +1,142 @@
+name: "Build and populate cache"
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git reference to build"
+        type: string
+        required: false
+      prNumber:
+        description: "nix-config PR number to rebase-merge after a successful build"
+        type: string
+        required: false
+      flakeUpdate:
+        description: "Update flake inputs before build"
+        type: boolean
+        default: false
+      nixosConfigurations:
+        description: "Build nixosConfigurations"
+        type: boolean
+        default: true
+      darwinConfigurations:
+        description: "Build darwinConfigurations"
+        type: boolean
+        default: true
+      homeConfigurations:
+        description: "Build homeConfigurations"
+        type: boolean
+        default: true
+      systemConfigs:
+        description: "Build systemConfigs"
+        type: boolean
+        default: true
+jobs:
+  list_configs:
+    runs-on: ubuntu-latest
+    outputs:
+      configs_matrix: ${{ steps.list.outputs.configs_matrix }}
+    steps:
+      - &checkout
+        uses: actions/checkout@v7
+        with:
+          repository: XYenon/nix-config
+          ref: ${{ inputs.ref || '' }}
+          token: ${{ secrets.REPO_TOKEN }}
+      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: DeterminateSystems/magic-nix-cache-action@v14
+      - name: List configurations
+        id: list
+        run: |
+          MATRIX=$(nix eval --json --impure --expr '
+            let
+              self = (builtins.getFlake (toString ./.)).outputs;
+              collect = kind:
+                builtins.map (name: {
+                  inherit kind name;
+                  system = let
+                    cfg = builtins.getAttr name (builtins.getAttr kind self);
+                  in
+                    cfg.config.nixpkgs.system or cfg.pkgs.stdenv.hostPlatform.system or cfg.stdenv.hostPlatform.system or cfg.system;
+                }) (builtins.attrNames (self.${kind} or {}));
+            in
+              (collect "nixosConfigurations")
+              ++ (collect "darwinConfigurations")
+              ++ (collect "homeConfigurations")
+              ++ (collect "systemConfigs")
+          ')
+          MATRIX=$(echo "$MATRIX" | jq -c --arg nixos '${{ github.event_name == 'schedule' && 'true' || inputs.nixosConfigurations }}' \
+            --arg darwin '${{ github.event_name == 'schedule' && 'true' || inputs.darwinConfigurations }}' \
+            --arg home '${{ github.event_name == 'schedule' && 'true' || inputs.homeConfigurations }}' \
+            --arg system '${{ github.event_name == 'schedule' && 'true' || inputs.systemConfigs }}' \
+            'map(select(
+              (.kind == "nixosConfigurations" and $nixos == "true") or
+              (.kind == "darwinConfigurations" and $darwin == "true") or
+              (.kind == "homeConfigurations" and $home == "true") or
+              (.kind == "systemConfigs" and $system == "true")
+            )) | group_by(.system) | map({system: .[0].system, configs: .})')
+          echo "configs_matrix=$MATRIX" >> $GITHUB_OUTPUT
+  build:
+    needs: [list_configs]
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.system }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.list_configs.outputs.configs_matrix) }}
+    runs-on: ${{ (contains(matrix.system, 'darwin') && 'macos-latest') || (contains(matrix.system, 'aarch64') && 'ubuntu-24.04-arm') || 'ubuntu-latest' }}
+    steps:
+      - *checkout
+      - name: Allow bwrap user namespaces on Ubuntu
+        if: runner.os == 'Linux'
+        run: |
+          if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - uses: wimpysworld/nothing-but-nix@v10
+      - uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            build-dir = /nix/build
+            accept-flake-config = true
+            log-lines = 200
+            extra-substituters = https://xyenon.cachix.org https://nur-xyenon.cachix.org https://nix-community.cachix.org https://cache.numtide.com
+            extra-trusted-public-keys = xyenon.cachix.org-1:gH84PRzrUvoIv9Pl472D95LRzFN7E/kXoExqAm2c6Dk= nur-xyenon.cachix.org-1:fZ3SGJ3E1p34JSG5j4etfF9+vjJGMZxe1dDBNliKx5U= nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs= cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g= niks3.numtide.com-1:DTx8wZduET09hRmMtKdQDxNNthLQETkc/yaX7M4qK0g=
+      - name: Update flake inputs
+        if: github.event_name == 'schedule' || inputs.flakeUpdate
+        run: nix flake update
+      - name: Install attic-client
+        run: nix profile add --accept-flake-config github:XYenon/nur-packages#attic-client
+      - uses: XYenon/attic-action@v0
+        with:
+          endpoint: "https://attic.xyenon.download"
+          cache: xyenon
+          token: ${{ secrets.ATTIC_AUTH_TOKEN }}
+          push-args: "-j 1"
+          push-max-retries: "10"
+      - name: Build configurations for ${{ matrix.system }}
+        run: |
+          ./scripts/build-gh.sh '${{ toJson(matrix.configs) }}'
+  merge_pr:
+    needs: [build]
+    if: >-
+      ${{ needs.build.result == 'success'
+      && github.event_name == 'workflow_dispatch'
+      && inputs.prNumber != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Rebase and merge nix-config PR
+        env:
+          GH_TOKEN: ${{ secrets.REPO_TOKEN }}
+          PR_NUMBER: ${{ inputs.prNumber }}
+        run: |
+          set -euo pipefail
+          echo "Rebasing and merging XYenon/nix-config#$PR_NUMBER"
+          gh pr merge "$PR_NUMBER" \
+            --repo XYenon/nix-config \
+            --rebase \
+            --delete-branch
