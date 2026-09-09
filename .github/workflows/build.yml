@@ -42,7 +42,7 @@ jobs:
           repository: XYenon/nix-config
           ref: ${{ inputs.ref || '' }}
           token: ${{ secrets.REPO_TOKEN }}
-      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: DeterminateSystems/nix-installer-action@v23
       - uses: DeterminateSystems/magic-nix-cache-action@v14
       - name: List configurations
         id: list
