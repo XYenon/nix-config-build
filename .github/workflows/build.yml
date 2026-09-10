@@ -43,7 +43,7 @@ jobs:
           ref: ${{ inputs.ref || '' }}
           token: ${{ secrets.REPO_TOKEN }}
       - uses: DeterminateSystems/nix-installer-action@v23
-      - uses: DeterminateSystems/magic-nix-cache-action@v14
+      - uses: DeterminateSystems/magic-nix-cache-action@v15
       - name: List configurations
         id: list
         run: |
