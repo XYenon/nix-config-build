@@ -74,7 +74,7 @@ jobs:
               (.kind == "homeConfigurations" and $home == "true") or
               (.kind == "systemConfigs" and $system == "true")
             )) | group_by(.system) | map({system: .[0].system, configs: .})')
-          echo "configs_matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "configs_matrix=$MATRIX" >> "$GITHUB_OUTPUT"
   build:
     needs: [list_configs]
     concurrency:
@@ -84,7 +84,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJson(needs.list_configs.outputs.configs_matrix) }}
-    runs-on: ${{ (contains(matrix.system, 'darwin') && 'macos-latest') || (contains(matrix.system, 'aarch64') && 'ubuntu-24.04-arm') || 'ubuntu-latest' }}
+    runs-on: ${{ (contains(matrix.system, 'darwin') && 'macos-latest') || (contains(matrix.system, 'aarch64') && 'ubuntu-24.04-arm') || 'devbox-linux' }}
     steps:
       - *checkout
       - name: Allow bwrap user namespaces on Ubuntu
@@ -94,7 +94,9 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
       - uses: wimpysworld/nothing-but-nix@v10
+        if: runner.environment == 'github-hosted'
       - uses: cachix/install-nix-action@v31
+        if: runner.environment == 'github-hosted'
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
