@@ -1,0 +1,62 @@
+name: Deploy-rx diagnostic
+on:
+  push:
+    branches: [diag/deploy-rx-timeout]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: nix-config diagnostic branch
+        default: diag/deploy-rx-timeout
+        type: string
+jobs:
+  diagnostic:
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: devbox-linux
+          - system: aarch64-darwin
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: XYenon/nix-config
+          ref: ${{ inputs.ref || 'diag/deploy-rx-timeout' }}
+          token: ${{ secrets.REPO_TOKEN }}
+      - uses: cachix/install-nix-action@v31
+        if: runner.environment == 'github-hosted'
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+            log-lines = 200
+      - name: Record environment
+        run: |
+          mkdir -p diagnostic-artifacts
+          git rev-parse HEAD > diagnostic-artifacts/config-commit.txt
+          nix --version > diagnostic-artifacts/nix-version.txt
+          uname -a > diagnostic-artifacts/uname.txt
+          ps -eo pid,ppid,pcpu,pmem,comm > diagnostic-artifacts/processes-before.txt
+      - name: Build and repeat deploy-rx tests only
+        env:
+          DIAGNOSTIC_SYSTEM: ${{ matrix.system }}
+          DIAGNOSTIC_RUN: ${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          nix build --impure --file scripts/deploy-rx-diagnostic.nix \
+            --argstr system "$DIAGNOSTIC_SYSTEM" --argstr runId "$DIAGNOSTIC_RUN" \
+            --out-link diagnostic-result -L 2>&1 | tee diagnostic-artifacts/build.log
+          cp -RL diagnostic-result/. diagnostic-artifacts/
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deploy-rx-diagnostic-${{ matrix.system }}
+          path: diagnostic-artifacts/
+      - name: Check test outcomes
+        shell: bash
+        run: |
+          jq -e 'length > 0 and all(.[]; .status == 0)' diagnostic-artifacts/summary.json
