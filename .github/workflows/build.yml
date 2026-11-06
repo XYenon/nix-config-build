@@ -93,7 +93,7 @@ jobs:
           if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
-      - uses: wimpysworld/nothing-but-nix@v11
+      - uses: wimpysworld/nothing-but-nix@v12
         if: runner.environment == 'github-hosted'
       - uses: cachix/install-nix-action@v31
         if: runner.environment == 'github-hosted'
